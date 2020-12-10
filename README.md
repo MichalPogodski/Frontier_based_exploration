@@ -1,5 +1,4 @@
-# Frontier_based_exploration
-# Exploration algorithm for coverage path planning
+## Frontier based exploration for coverage path planning
 
 * find frontiers in a map
 * choose the longest group of frontiers
