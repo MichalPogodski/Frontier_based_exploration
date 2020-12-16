@@ -2,9 +2,12 @@
 import rospy
 from nav_msgs.msg import OccupancyGrid
 from copy import copy
+from move_base_msgs.msg import MoveBaseGoal
 
 map_cpy = OccupancyGrid()
 frontiers_groups = []
+goal = MoveBaseGoal()
+goal_request = False
 # free 0, obstacle 100, unknown -1
 
 
@@ -31,7 +34,7 @@ def newFrontier(col, row, map):
 
 def checkSets(col, row, map):
     global frontiers_groups
-    neig_pos = [(-1, 0), (0, -1), (1, 0), (0, 1)]
+    neig_pos = [(-1, 1), (0, 1), (1, 1), (-1, 0), (1, 0), (-1, -1), (0, -1), (1, -1)]
 
     for i, n in enumerate(neig_pos):
         n_row,n_col = row + n[0], col + n[1]
@@ -62,15 +65,25 @@ def calculateNewGoal():
     if len(frontiers_groups) == 0:
         print('EXPLORATION FINISHED!')
     else:
-        toExplore = max(frontiers_groups, key=len)
-        for loc in toExplore:
-            print(loc)
+        # toExplore = max(frontiers_groups, key=len)
+        # for loc in toExplore:
+        #     print(loc)
+        print(frontiers_groups[0])
         # jezeli instnieja to znajdz najdluzszy
         # wybierz jego element najblizszy robotowi
         # wystaw ten punkt
         # wyczysc frontiersy ?
-        
+
 # ZADAJ DOJAZD
+    global goal, goal_request, frontiers_groups
+    goal.target_pose.header.frame_id = "map"
+    goal.target_pose.header.stamp = rospy.Time.now()
+    goal.target_pose.pose.position.x, goal.target_pose.pose.position.x = frontiers_groups[len(frontiers_groups)-1][0][0], frontiers_groups[len(frontiers_groups)-1][0][1]
+    goal.target_pose.pose.orientation.w = 1.0
+    goal_request = True
+    frontiers_groups = []
+
+
 
 
 
@@ -84,9 +97,13 @@ def callback(data):
 
 
 def mapListener():
+    global goal_request
     rospy.init_node('map_listener', anonymous=True)
     rospy.Subscriber('map', OccupancyGrid, callback)
     pub = rospy.Publisher('map_copy', OccupancyGrid, queue_size=10)
+    if goal_request:
+        pub = rospy.Publisher('frontier_exploration/new_goal', goal, queue_size=10)
+        goal_request = False
 
     rate = rospy.Rate(1)
     while not rospy.is_shutdown():
