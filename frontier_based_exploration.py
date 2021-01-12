@@ -1,115 +1,129 @@
 #!/usr/bin/env python
 import rospy
+from geometry_msgs.msg import PoseStamped
+from actionlib_msgs.msg import GoalStatusArray
+from std_srvs.srv import Trigger, TriggerResponse
+from geometry_msgs.msg import Twist
 from nav_msgs.msg import OccupancyGrid
-from copy import copy
 from move_base_msgs.msg import MoveBaseGoal
+from copy import copy
 
-map_cpy = OccupancyGrid()
+map = OccupancyGrid()
+goal = PoseStamped()
+collected = False
+exploring = False
 frontiers_groups = []
-goal = MoveBaseGoal()
-goal_request = False
-# free 0, obstacle 100, unknown -1
-
-
-def get_pos_xy(marker, col, row):
-    mul = 1. / map.info.resolution
-    x = int(col * mul)
-    y = int(row * mul)
-    return x, y
-
+status = None
 
 
 def newFrontier(col, row, map):
+    print('1')
     global frontiers_groups
-    if map.data[col + row * map.info.width] == 0 and map.data[col + row * map.info.width] not in frontiers_groups:
+    if map.data[col + row * map.info.width] == 0:
+
+        # if map.data[col + row * map.info.width] not in frontiers_groups:
         for i in range(-1, 2):
             for j in range(-1, 2):
                 if (0 <= col + i < map.info.width) and (0 <= row + j < map.info.height):
                     if map.data[i + j * map.info.width] == -1:
                         return True
-
-    return False
-
-
-
-def checkSets(col, row, map):
-    global frontiers_groups
-    neig_pos = [(-1, 1), (0, 1), (1, 1), (-1, 0), (1, 0), (-1, -1), (0, -1), (1, -1)]
-
-    for i, n in enumerate(neig_pos):
-        n_row,n_col = row + n[0], col + n[1]
-        existed_frontiers = []
-        for j, group in enumerate(frontiers_groups):
-            if map.data[n_col + n_row * map.info.width] in group:
-                existed_frontiers.append(j)
-        if len(existed_frontiers) == 1:
-            frontiers_groups[existed_frontiers[0]].append(frontiers_groups[existed_frontiers[1:]])
-        elif len(existed_frontiers) != 0:
-            frontiers_groups[existed_frontiers[0]].append([col, row])
-            frontiers_groups.delete[existed_frontiers[1:]]
-        else:
-            frontiers_groups.append([[col, row]])
-
+                    else: return False
 
 
 def findFrontiers(map):
+    print('2')
+    global frontiers_groups, exploring
 
     for col in range(map.info.width):
         for row in range(map.info.height):
             if newFrontier(col, row, map):
-                checkSets(col, row, map)
+                # checkSets(col, row, map)
+                if [col, row] not in frontiers_groups:
+                    frontiers_groups.append([col, row])
+                    print(len(frontiers_groups))
     return True
 
 
 def calculateNewGoal():
+    print('3')
+    global goal,  frontiers_groups, exploring
     if len(frontiers_groups) == 0:
         print('EXPLORATION FINISHED!')
     else:
-        # toExplore = max(frontiers_groups, key=len)
-        # for loc in toExplore:
-        #     print(loc)
-        print(frontiers_groups[0])
-        # jezeli instnieja to znajdz najdluzszy
-        # wybierz jego element najblizszy robotowi
-        # wystaw ten punkt
-        # wyczysc frontiersy ?
-
-# ZADAJ DOJAZD
-    global goal, goal_request, frontiers_groups
-    goal.target_pose.header.frame_id = "map"
-    goal.target_pose.header.stamp = rospy.Time.now()
-    goal.target_pose.pose.position.x, goal.target_pose.pose.position.x = frontiers_groups[len(frontiers_groups)-1][0][0], frontiers_groups[len(frontiers_groups)-1][0][1]
-    goal.target_pose.pose.orientation.w = 1.0
-    goal_request = True
-    frontiers_groups = []
+        goal.pose.position.x = frontiers_groups[0][0]
+        goal.pose.position.y = frontiers_groups[0][1]
+        goal.header.frame_id = "map"
+        goal.header.stamp = rospy.Time.now()
+        # goal.target_pose.pose.position.x, goal.target_pose.pose.position.x = frontiers_groups[len(frontiers_groups)-1][0][0], frontiers_groups[len(frontiers_groups)-1][0][1]
+        print('#########################', frontiers_groups[0])
+        goal.pose.orientation.w = 1.0
+        del frontiers_groups[:]
+        exploring = True
+        pub.publish(goal)
 
 
 
+def map_callback(data):
+    print('4')
+    global map, collected
 
-
-def callback(data):
     map = copy(data)
     map.data = list(map.data)
-
-    finished = findFrontiers(map)
-    if finished: calculateNewGoal()
-
-
-
-def mapListener():
-    global goal_request
-    rospy.init_node('map_listener', anonymous=True)
-    rospy.Subscriber('map', OccupancyGrid, callback)
-    pub = rospy.Publisher('map_copy', OccupancyGrid, queue_size=10)
-    if goal_request:
-        pub = rospy.Publisher('frontier_exploration/new_goal', goal, queue_size=10)
-        goal_request = False
-
-    rate = rospy.Rate(1)
-    while not rospy.is_shutdown():
-        pub.publish(map_cpy)
-        rate.sleep()
+    print('4.1')
+    if not exploring:
+        print('4.2')
+        collected = findFrontiers(map)
+        print('4.3')
+        if collected:
+            print('4.4')
+            calculateNewGoal()
+            print('4.5')
+            collected = False
+    else:
+        print('4.6')
+        pass
 
 
-if __name__ == '__main__':
-    mapListener()
+
+
+def check_pose(cur_pose):
+    print('5')
+    #znacznie okrojona funkcja z moving_real
+    global status, exploring
+    status = cur_pose
+    print('%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%', cur_pose.status_list[-1].status)
+    if (cur_pose.status_list[-1].status == 3):
+        exploring = False
+
+
+
+# def dest_achieved(arrived):
+#     global exploring
+#     if arrived:
+#         exploring = False
+
+
+
+print('6')
+rospy.init_node('frontier_exploration', anonymous=True)
+
+rospy.Subscriber('map', OccupancyGrid, map_callback)
+rospy.Subscriber("/move_base/status", GoalStatusArray, check_pose)
+# rospy.Subscriber('/frontier_exploration/goal', PoseStamped, dest_achieved)
+print('7')
+
+pub = rospy.Publisher('frontier_exploration/new_goal', PoseStamped, queue_size=10)
+rate = rospy.Rate(1)
+print('8')
+while not rospy.is_shutdown():
+    rospy.spin()
+
+
+
+
+
+
+
+
+
+
